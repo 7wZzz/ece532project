@@ -1,0 +1,201 @@
+---
+title: "532 project update Two"
+author: "Qiwen Zeng"
+date: "12/1/2020"
+output: html_document
+---
+
+```{r}
+
+knitr::opts_chunk$set(message = FALSE,warning=FALSE)
+```
+The dataset is from the UCI Machine Learning Repository, and the dataset contains individual
+level data collected from the countries of Mexico, Peru and Colombia. There are 2,109
+individuals in total, and each row contains the information about the eating habits and physical
+condition of the individual. There are 17 features in total. The classification target is the obesity
+level of those individuals, and the obesity level has seven different labels ranging from
+insufficient weight to obesity type III. The main question of this classification problem is that
+whether people can classify the obesity level based on eating habits and physical conditions. To make it as an easy question, I set obesity level below type II as 0 and above type II as 1. Then I separate the data into training and testing data with a ratio of 0.8 training. Then I transfer all categorical data into one hot encoding. After this, I normalize the data to compare the coefficients. 
+```{r}
+library(tidyverse)
+library(caret)
+library(glmnet)
+dat=read.csv("532data.csv")
+for (i in 1:ncol(dat)) {
+  if(typeof(dat[,i])!="double"){
+    dat[,i]=as.factor(dat[,i])
+  }
+}
+set.seed(123)
+training.samples <- dat$NObeyesdad %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- dat[training.samples, ]
+test.data <- dat[-training.samples, ]
+# Dummy code categorical predictor variables
+x <- model.matrix(NObeyesdad~., train.data)[,-1]
+y=as.character(train.data$NObeyesdad)
+y[y=="Insufficient_Weight"|y=="Normal_Weight"|y=="Obesity_Type_I"]=0
+y[y!=0]=1
+y=as.numeric(y)
+x=scale(x)
+x.test <- model.matrix(NObeyesdad ~., test.data)[,-1]
+y.test=as.character(test.data$NObeyesdad)
+y.test[y.test=="Insufficient_Weight"|y.test=="Normal_Weight"|y.test=="Obesity_Type_I"]=0
+y.test[y.test!=0]=1
+y.test=as.numeric(y.test)
+x.test=scale(x.test)
+```
+# Logistic Regression
+The first model I tried is the logistic regression model, and the data was seperated into the training and testing set with a traing ratio of 0.8.
+
+```{r}
+# Fit the model
+train.data$NObeyesdad=y
+full.model <- glm(y ~.,data=data.frame(x), family = binomial)
+# Make predictions
+test.data$NObeyesdad=NULL
+
+probabilities <- full.model %>% predict(data.frame(x.test), type = "response")
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+#train.data$NObeyesdad=NULL
+probabilities_train <- full.model %>% predict(data.frame(x), type = "response")
+predicted.classes_train <- ifelse(probabilities_train > 0.5, 1, 0)
+
+# Model accuracy
+observed.classes <- y.test
+summary(full.model)
+mean(predicted.classes == observed.classes)
+mean(predicted.classes_train == y)
+```
+From the model, we can see that there are many significant variables, and the testing accuracy is 0.7448194 which is slightly lower than the training accuracy (0.7547619).
+# Logistic Regression with LASSO
+The next model I run is the logistic regression with regularization. I tried both the l1 and the l2 regularization, and the lambda is chosen by 10 folder cross validation.
+
+```{r}
+set.seed(123)
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+plot(cv.lasso)
+
+
+
+```
+```{r}
+cv.lasso$lambda.min
+
+
+
+```
+From the plot and the cross validation result, the optimal value for lambda is 0.003. 
+
+```{r}
+coef(cv.lasso, cv.lasso$lambda.min)
+
+
+```
+The method selected a lot of features, and this makes sense since the regularization term lambda is pretty small.
+```{r}
+lasso.model <- glmnet(x, y, alpha = 1, family = "binomial",
+                      lambda = cv.lasso$lambda.min)
+probabilities <- lasso.model %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == y.test)
+```
+We can see that the testing accuracy decreased slightly, and it indicates that there may not have an overfitting problem, and variable selection algorithm did not work well. Then I conduct the same analysis with the Ridge regression algorithm.
+# Logistic Regression with Ridge
+```{r}
+set.seed(123)
+cv.ridge <- cv.glmnet(x, y, alpha = 0, family = "binomial")
+plot(cv.ridge)
+
+
+```
+```{r}
+cv.ridge$lambda.min
+
+```
+
+The optimal ridge regression lambda is 0.02666346.
+
+```{r}
+ridge.model <- glmnet(x, y, alpha = 0, family = "binomial",
+                      lambda = cv.ridge$lambda.min)
+probabilities <- ridge.model %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == y.test)
+
+
+```
+
+The Ridge regression accuracy is better than the LASSO, but the logistic regression is still be best in terms of the testing accuracy. 
+
+# Linear Support Vector Machine
+```{r}
+#install.packages("e1071")
+library(e1071)
+svmfit = svm(y ~ ., data = data.frame(x), kernel = "linear", cost = 10, scale = FALSE)
+print(svmfit)
+probabilities <- svmfit %>% predict(data.frame(x.test))
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == y.test)
+
+```
+From here, we can see that the linear SVM has the highest testing accuracy which is 0.76667. However, from this results, we can see that there are 11,00 suport vectors which is a huge number. 
+
+# Non-Linear Support Vector Machine
+```{r}
+svmfit = svm(y ~ ., data = data.frame(x), kernel = "polynomial", cost = 10, scale = FALSE)
+print(svmfit)
+probabilities <- svmfit %>% predict(data.frame(x.test))
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == y.test)
+
+svmfit = svm(y ~ ., data = data.frame(x), kernel = "radial", cost = 10, scale = FALSE)
+print(svmfit)
+probabilities <- svmfit %>% predict(data.frame(x.test))
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == y.test)
+
+svmfit = svm(y ~ ., data = data.frame(x), kernel = "sigmoid", cost = 10, scale = FALSE)
+print(svmfit)
+probabilities <- svmfit %>% predict(data.frame(x.test))
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == y.test)
+```
+Then I tried three non-linear SVM with polynomial, radial basis and sigmoid kernels respectfully. We can see that the results improved greatly with the polynomial and radial basis kernel that the accuracies are 0.885 and 0.921 with 927 and 811 support vectors. However, the sigmoid kernel gives pretty bad result (0.554).
+
+Note: the non-linear methods do give much better model performance, but the interpretation is unclear here, and it is hard for us to say which variable will have an effect on overweighting.
+
+
+# Random Forest
+The next model I run is the random forest which is one of the best methods for binary classification. 
+
+```{r}
+set.seed(123)
+library(randomForest)
+train.data$NObeyesdad=as.factor(train.data$NObeyesdad)
+rf_classifier = randomForest(NObeyesdad ~ ., data=train.data, ntree=100, mtry=2, importance=TRUE)
+prediction_for_table <- predict(rf_classifier,test.data)
+table(observed=y.test,predicted=prediction_for_table)
+rf_classifier = randomForest(NObeyesdad ~ ., data=train.data, ntree=500, mtry=2, importance=TRUE)
+prediction_for_table <- predict(rf_classifier,test.data)
+table(observed=y.test,predicted=prediction_for_table)
+
+rf_classifier = randomForest(NObeyesdad ~ ., data=train.data, ntree=1000, mtry=2, importance=TRUE)
+prediction_for_table <- predict(rf_classifier,test.data)
+table(observed=y.test,predicted=prediction_for_table)
+
+```
+I tried random forest with 100, 500, 1000 trees respectively, and the 500 tree model is the best with a testing accuracy of 96.7%. 
+
+
+
+
+
+
+All analysis is done for this project, and the final step is writing the analysis into the report which contains more discussions about the results and analysis.
